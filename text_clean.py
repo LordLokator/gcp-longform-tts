@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+import re
+import unicodedata
+from dataclasses import dataclass
+from pathlib import Path
+
+UPPER_HU = "A-ZÁÉÍÓÖŐÚÜŰ"
+LOWER_HU = "a-záéíóöőúüű"
+
+DOT_PLACEHOLDER = "∯"  # rare symbol to temporarily replace abbreviation dots
+
+
+@dataclass
+class CleanConfig:
+    """Text cleanup config (tweak freely per book)."""
+
+    # Lines to drop (full-line matches)
+    drop_line_patterns: tuple[str, ...] = (
+        r"^\s*\d+\s*$",                           # page number line: "12"
+        r"^\s*[–—-]?\s*\d+\s*[–—-]?\s*$",         # "— 12 —"
+    )
+
+    # Extra "contains" filters (if you know header/footer text fragments)
+    drop_line_if_contains: tuple[str, ...] = (
+        # Example: "Tartalomjegyzék",
+        # Example: "Kiadó:",
+    )
+
+    # Common abbreviations to protect from sentence splitting (extend freely)
+    abbreviations: tuple[str, ...] = (
+        "Dr.", "Prof.", "pl.", "Pl.", "stb.", "Stb.", "kb.", "Kb.",
+        "u.", "U.", "vö.", "Vö.", "ld.", "Ld.", "sz.", "Sz.",
+        "év.", "Év.", "old.", "Old.", "fej.", "Fej.",
+    )
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def write_text(path: Path, text: str) -> None:
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def normalize_unicode(text: str) -> str:
+    # Normalize to a consistent form (helps with “lookalike” characters)
+    text = unicodedata.normalize("NFKC", text)
+
+    # Normalize line endings
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    # Convert NBSP and friends to normal spaces
+    text = text.replace("\u00A0", " ").replace("\u2007", " ").replace("\u202F", " ")
+
+    # Normalize quotes/dashes (optional but helps TTS consistency)
+    text = text.replace("“", "\"").replace("”", "\"").replace("„", "\"")
+    text = text.replace("’", "'").replace("–", "-").replace("—", "-")
+
+    return text
+
+
+def remove_control_chars(text: str) -> str:
+    # Remove ASCII control chars except newline/tab
+    text = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F]", "", text)
+    return text
+
+
+def drop_junk_lines(text: str, cfg: CleanConfig) -> str:
+    lines = text.split("\n")
+    kept: list[str] = []
+    for line in lines:
+        raw = line
+
+        # Drop if matches any full-line pattern
+        if any(re.match(pat, raw) for pat in cfg.drop_line_patterns):
+            continue
+
+        # Drop if contains known header/footer fragments
+        if cfg.drop_line_if_contains and any(fragment in raw for fragment in cfg.drop_line_if_contains):
+            continue
+
+        kept.append(raw)
+    return "\n".join(kept)
+
+
+def fix_hyphenation(text: str) -> str:
+    # 1) Hungarian year + suffix split across lines: "1996-\nban" -> "1996-ban"
+    text = re.sub(
+        r"(\b\d{4})-\n(?=(ban|ben|ból|ből|nál|nél|ra|re|ig|tól|től|val|vel|ként|kor)\b)",
+        r"\1-",
+        text,
+    )
+    return text
+
+
+def collapse_whitespace(text: str) -> str:
+    # Trim trailing spaces on each line
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    # Collapse excessive blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    # Collapse internal multiple spaces (but keep newlines for now)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text
+
+
+def merge_soft_linebreaks(text: str) -> str:
+    """
+    Heuristic merge:
+    - Keep blank lines as paragraph separators.
+    - Merge single newlines that look like wrapped lines into spaces.
+    """
+
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+
+    bullet_re = re.compile(r"^\s*([•\-–—]|(\d+[\.\)]))\s+")
+    heading_re = re.compile(r"^\s*[A-ZÁÉÍÓÖŐÚÜŰ0-9][A-ZÁÉÍÓÖŐÚÜŰ0-9 \-]{4,}\s*$")
+
+    while i < len(lines):
+        line = lines[i].strip()
+        if line == "":
+            out.append("")
+            i += 1
+            continue
+
+        # Bullets/headings: keep as separate lines
+        if bullet_re.match(line) or heading_re.match(line):
+            out.append(line)
+            i += 1
+            continue
+
+        # Merge following lines if they look like continuation (until blank line)
+        buf = line
+        j = i + 1
+        while j < len(lines):
+            nxt = lines[j].strip()
+            if nxt == "":
+                break
+            if bullet_re.match(nxt) or heading_re.match(nxt):
+                break
+
+            # If current buffer ends a sentence strongly, don't merge further
+            if re.search(r"[.!?…]([\"'\)\]]*)\s*$", buf):
+                break
+
+            # If next line starts like continuation: lowercase, digit, quote, bracket
+            if re.match(rf"^[{LOWER_HU}0-9\"'\(\[]", nxt):
+                buf += " " + nxt
+                j += 1
+                continue
+
+            # If next starts uppercase, it *might* be a new sentence, so stop
+            if re.match(rf"^[{UPPER_HU}]", nxt):
+                break
+
+            buf += " " + nxt
+            j += 1
+
+        out.append(buf)
+        i = j
+
+    return "\n".join(out)
+
+
+def protect_abbreviations(text: str, cfg: CleanConfig) -> str:
+    for abbr in cfg.abbreviations:
+        text = text.replace(abbr, abbr.replace(".", DOT_PLACEHOLDER))
+
+    # Protect initials like "A." "B." in names
+    text = re.sub(rf"\b([{UPPER_HU}])\.", rf"\1{DOT_PLACEHOLDER}", text)
+
+    # Protect multi-initial sequences: "A. B." already handled, but this keeps it stable
+    return text
+
+
+def restore_abbreviations(text: str) -> str:
+    return text.replace(DOT_PLACEHOLDER, ".")
+
+
+def insert_sentence_breaks(text: str) -> str:
+    # Normalize ellipsis variations
+    text = text.replace("...", "…")
+
+    # Capture sentence end + optional closing quotes/brackets, then whitespace,
+    # then assert the next char is uppercase (Hungarian)
+    pattern = rf"((?:(?<!\d)\.)|[\!\?…])([\"'\)\]]*)\s+(?=[{UPPER_HU}])"
+    text = re.sub(pattern, r"\1\2\n\n", text)
+
+    return text
+
+
+def final_polish(text: str) -> str:
+    text = re.sub(r" *\n *", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip() + "\n"
+
+
+def clean_text(text: str, cfg: CleanConfig) -> str:
+    text = normalize_unicode(text)
+    text = remove_control_chars(text)
+    text = drop_junk_lines(text, cfg)
+
+    text = fix_hyphenation(text)
+    text = collapse_whitespace(text)
+
+    text = merge_soft_linebreaks(text)
+
+    text = protect_abbreviations(text, cfg)
+    text = insert_sentence_breaks(text)
+    text = restore_abbreviations(text)
+
+    text = final_polish(text)
+    return text
+
+
+def clean_file(src: Path, out: Path, cfg: CleanConfig | None = None) -> Path:
+    cfg = cfg or CleanConfig()
+    raw = read_text(src)
+    cleaned = clean_text(raw, cfg)
+    write_text(out, cleaned)
+    return out
+
+
+def main():
+    from config import RAW_TEXT_DIR, PROCESSED_TEXT_DIR
+
+    src = RAW_TEXT_DIR / "raw_intro.txt"
+    out = PROCESSED_TEXT_DIR / "text_intro.txt"
+
+    clean_file(src, out)
+    print(f"[WROTE] {out}")
+
+
+if __name__ == "__main__":
+    main()

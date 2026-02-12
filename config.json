@@ -1,0 +1,11 @@
+{
+  "voice": {
+    "languageCode": "hu-HU",
+    "name": "hu-HU-Chirp3-HD-Algenib"
+  },
+  "audioConfig": {
+    "audioEncoding": "LINEAR16",
+    "speakingRate": 0.95,
+    "sampleRateHertz": 24000
+  }
+}
