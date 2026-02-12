@@ -2,21 +2,20 @@
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:
-  scan:
+  trufflehog:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout full history
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Run TruffleHog
-        uses: trufflesecurity/trufflehog@v3.88.0
+      - name: TruffleHog (scan entire branch)
+        uses: trufflesecurity/trufflehog@main
         with:
-          # Scan the git history and diff properly
-          scanArguments: >-
-            --git
-            --only-verified
+          base: ""
+          head: ${{ github.ref_name }}
+          extra_args: --no-verification
