@@ -91,6 +91,8 @@ def synthesize_text(
     max_bytes: int = MAX_BYTES_PER_REQUEST,
     chunk_offset: int = 0,
     sleep_s: float = 0.0,
+    dry_run: bool = False,
+    skip_existing: bool = False,
 ) -> list[Path]:
 
     client = texttospeech.TextToSpeechClient()
@@ -106,36 +108,37 @@ def synthesize_text(
         speaking_rate=config["audioConfig"].get("speakingRate"),
     )
 
-    # def _chunk_text(src: str, limit: int) -> list[str]:
-    #     chunks: list[str] = []
-    #     pos = 0
-
-    #     while pos < len(src):
-
-    #         window = src[pos: pos + limit]
-    #         cut = window.rfind("\n")
-
-    #         # Fallback to hard split if newline is missing or too early
-    #         if cut < 0 or cut < len(window) * 0.5:
-    #             cut = len(window)
-
-    #         chunk = window[:cut].strip()
-    #         if chunk:
-    #             chunks.append(chunk)
-
-    #         # Move past the cut + possible newline
-    #         pos += cut + 1
-
-    #     return chunks
-
     out_dir.mkdir(parents=True, exist_ok=True)
 
     parts = list(_iter_chunks_by_paragraphs(text, max_bytes=max_bytes))
     written: list[Path] = []
 
+    if dry_run:
+        total = len(parts)
+        would = []
+        for idx in range(1, total + 1):
+            if idx < chunk_offset:
+                continue
+            part_path = out_dir / f"{output_stem}_part{idx}.wav"
+            if skip_existing and part_path.exists():
+                continue
+            would.append(idx)
+        print(f"[dry-run] {output_stem}: {len(text)} chars, {total} chunk(s)")
+        if chunk_offset:
+            print(f"[dry-run] offset={chunk_offset} -> starts at chunk {chunk_offset}")
+        if skip_existing:
+            print("[dry-run] skip_existing=True (will not resynthesize existing wav chunks)")
+        print(f"[dry-run] would synthesize {len(would)} chunk(s): {would[:20]}" + (" ..." if len(would) > 20 else ""))
+        return []
+
     for idx, segment in enumerate(parts, start=1):
         if idx < chunk_offset:
             print(f"[skip] chunk {idx}/{len(parts)} (offset={chunk_offset})")
+            continue
+
+        part_path = out_dir / f"{output_stem}_part{idx}.wav"
+        if skip_existing and part_path.exists():
+            print(f"[skip] exists: {part_path.name}")
             continue
 
         start = time.time()
@@ -153,7 +156,6 @@ def synthesize_text(
                 }
             )
 
-            part_path = out_dir / f"{output_stem}_part{idx}.wav"
             part_path.write_bytes(resp.audio_content)
             written.append(part_path)
 
