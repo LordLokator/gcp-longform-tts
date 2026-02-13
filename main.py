@@ -89,10 +89,28 @@ def cmd_run(args: argparse.Namespace) -> None:
     clean_out = PROCESSED_TEXT_DIR / f"text_{chapter}.txt"
 
     # 1) PDF -> raw text
-    pdf_to_raw_text(PdfToTextConfig(src=pdf, out=raw_out, join_with=args.join_with, overwrite=args.overwrite))
+    pdf_to_raw_text(
+        PdfToTextConfig(
+            src=pdf,
+            out=raw_out,
+            join_with=args.join_with,
+            overwrite=args.overwrite,
+        )
+    )
 
     # 2) raw -> cleaned
     clean_file(raw_out, clean_out, cfg=CleanConfig())
+    print(f"[ok] cleaned text -> {clean_out}")
+
+    # 2.5) manual pause (optional) BEFORE any remote calls
+    if args.pause_before_tts:
+        print("\n[manual] Review/edit the cleaned text now.")
+        print(f"         File: {clean_out}")
+        print("         When ready, press ENTER to continue (or type 'q' then ENTER to abort).")
+        resp = input("> ").strip().lower()
+        if resp in {"q", "quit", "exit"}:
+            print("[abort] stopped before TTS")
+            return
 
     # 3) cleaned -> wav chunks
     config = load_gcloud_config()
@@ -153,6 +171,14 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--sleep", type=float, default=0.0, help="Optional sleep between requests (seconds)")
     pr.add_argument("--dry-run", action="store_true", help="Only show chunking plan (no TTS requests)")
     pr.add_argument("--skip-existing", action="store_true", help="Skip chunks whose WAV already exists")
+
+    # Pause for Human in the Loop:
+    pr.add_argument(
+        "--pause-before-tts",
+        action="store_true",
+        help="Pause after auto-cleanup so you can manually edit the cleaned text before TTS",
+    )
+
     pr.set_defaults(func=cmd_run)
 
     return p
