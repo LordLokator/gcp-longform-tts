@@ -25,30 +25,72 @@ class PdfToTextConfig:
     overwrite: bool = False
     create_parents: bool = True
 
+    # Cropping: fractions of page height to ignore from top/bottom (0.0 disables)
+    top_pct: float = 0.0
+    bottom_pct: float = 0.0
+
+    # Optional debug page markers like "=== PAGE i ==="
+    add_page_markers: bool = False
+
 
 def write_text(path: Path, text: str, *, encoding: str = "utf-8", newline: str = "\n") -> None:
     path.write_text(text, encoding=encoding, newline=newline)
+
+
+def _validate_crop(top_pct: float, bottom_pct: float) -> None:
+    if top_pct == 0.0 and bottom_pct == 0.0:
+        return
+    if not (0.0 <= top_pct < 0.5 and 0.0 <= bottom_pct < 0.5 and (top_pct + bottom_pct) < 0.9):
+        raise ValueError(
+            "top_pct and bottom_pct must be in [0, 0.5) and not remove almost the whole page "
+            "(also require top_pct + bottom_pct < 0.9)."
+        )
 
 
 def extract_text_from_pdf(
     pdf_path: Path,
     *,
     page_sep: str = "",
+    top_pct: float = 0.0,
+    bottom_pct: float = 0.0,
+    add_page_markers: bool = False,
 ) -> str:
+    """
+    Extract text from PDF. Optionally crop the work area by ignoring top/bottom
+    fractions of each page height (useful for headers/footers).
+    """
     if not pdf_path.exists():
         raise FileNotFoundError(f"PDF not found: {pdf_path}")
     if pdf_path.suffix.lower() != ".pdf":
         raise ValueError(f"Not a PDF: {pdf_path}")
 
-    pages: list[str] = []
+    _validate_crop(top_pct, bottom_pct)
+
+    parts: list[str] = []
     doc = pymupdf.open(pdf_path)
     try:
-        for page in doc:
-            pages.append(page.get_text())
+        for i, page in enumerate(doc, start=1):
+            if top_pct != 0.0 or bottom_pct != 0.0:
+                rect = page.rect
+                h = rect.height
+                clip = pymupdf.Rect(
+                    rect.x0,
+                    rect.y0 + h * top_pct,
+                    rect.x1,
+                    rect.y1 - h * bottom_pct,
+                )
+                page_text = page.get_text("text", clip=clip)
+            else:
+                page_text = page.get_text("text")
+
+            if add_page_markers:
+                parts.append(f"\n\n=== PAGE {i} ===\n")
+
+            parts.append(page_text)
     finally:
         doc.close()
 
-    return page_sep.join(pages)
+    return page_sep.join(parts)
 
 
 def pdf_to_raw_text(cfg: PdfToTextConfig) -> Path:
@@ -58,7 +100,13 @@ def pdf_to_raw_text(cfg: PdfToTextConfig) -> Path:
     if cfg.create_parents:
         cfg.out.parent.mkdir(parents=True, exist_ok=True)
 
-    text = extract_text_from_pdf(cfg.src, page_sep=cfg.join_with)
+    text = extract_text_from_pdf(
+        cfg.src,
+        page_sep=cfg.join_with,
+        top_pct=cfg.top_pct,
+        bottom_pct=cfg.bottom_pct,
+        add_page_markers=cfg.add_page_markers,
+    )
     write_text(cfg.out, text, encoding=cfg.encoding, newline=cfg.newline)
     return cfg.out
 
@@ -73,7 +121,7 @@ def make_out_path(pdf_path: Path, out_dir: Path, suffix: str) -> Path:
 
 
 def run_cli(argv: Optional[list[str]] = None) -> int:
-    p = argparse.ArgumentParser(description="Extract raw text from PDF(s) into .txt files.")
+    p = argparse.ArgumentParser(description="Extract raw text from PDF(s) into .txt files (optional crop).")
     mode = p.add_mutually_exclusive_group(required=True)
 
     # Single-file mode
@@ -97,6 +145,27 @@ def run_cli(argv: Optional[list[str]] = None) -> int:
     p.add_argument("--overwrite", action="store_true", help="Overwrite existing outputs.")
     p.add_argument("--no-create-parents", action="store_true", help="Do not create output directories.")
 
+    # Cropping options
+    p.add_argument(
+        "--top",
+        type=float,
+        default=0.1,
+        help="Top margin to ignore, as fraction of page height (default: 0.0; e.g. 0.10 = 10%).",
+    )
+    p.add_argument(
+        "--bottom",
+        type=float,
+        default=0.1,
+        help="Bottom margin to ignore, as fraction of page height (default: 0.0; e.g. 0.10 = 10%).",
+    )
+
+    # Optional debug markers
+    p.add_argument(
+        "--page-markers",
+        action="store_true",
+        help='Add page markers like "=== PAGE i ===" to the output (off by default).',
+    )
+
     args = p.parse_args(argv)
 
     create_parents = not args.no_create_parents
@@ -114,6 +183,9 @@ def run_cli(argv: Optional[list[str]] = None) -> int:
             encoding=args.encoding,
             overwrite=args.overwrite,
             create_parents=create_parents,
+            top_pct=args.top,
+            bottom_pct=args.bottom,
+            add_page_markers=args.page_markers,
         )
         out_path = pdf_to_raw_text(cfg)
         print(f"Wrote: {out_path}")
@@ -142,6 +214,9 @@ def run_cli(argv: Optional[list[str]] = None) -> int:
                 encoding=args.encoding,
                 overwrite=args.overwrite,
                 create_parents=create_parents,
+                top_pct=args.top,
+                bottom_pct=args.bottom,
+                add_page_markers=args.page_markers,
             )
             try:
                 pdf_to_raw_text(cfg)
