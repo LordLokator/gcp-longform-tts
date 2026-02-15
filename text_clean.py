@@ -279,17 +279,14 @@ def merge_soft_linebreaks(text: str) -> str:
     while i < len(lines):
         line = lines[i].strip()
         if line == "":
-            out.append("")
+            out.append("")  # blank line preserves paragraph boundary
             i += 1
             continue
-
-        # Bullets/headings: keep as separate lines
         if bullet_re.match(line) or heading_re.match(line):
-            out.append(line)
+            out.append(line)  # keep bullets/headings separate
             i += 1
             continue
 
-        # Merge following lines if they look like continuation (until blank line)
         buf = line
         j = i + 1
         while j < len(lines):
@@ -341,18 +338,6 @@ def protect_abbreviations(text: str, cfg: CleanConfig) -> str:
 
 def restore_abbreviations(text: str) -> str:
     return text.replace(DOT_PLACEHOLDER, ".")
-
-
-def insert_sentence_breaks(text: str) -> str:
-    # Normalize ellipsis variations
-    text = text.replace("...", "…")
-
-    # Capture sentence end + optional closing quotes/brackets, then whitespace,
-    # then assert the next char is uppercase (Hungarian)
-    pattern = rf"((?:(?<!\d)\.)|[\!\?…])([\"'\)\]]*)\s+(?=[{UPPER_HU}])"
-    text = re.sub(pattern, r"\1\2\n\n", text)
-
-    return text
 
 
 def final_polish(text: str) -> str:
