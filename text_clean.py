@@ -83,7 +83,7 @@ def normalize_headings(text: str) -> str:
     # 1) Lowercase full-caps lines
     # ----------------------------
     fullcaps_pattern = re.compile(
-        rf"^[{UPPER_HU}0-9\.\:\-\–—\s]+$",
+        rf"^[{UPPER_HU}0-9.:\-–—()\s]+$",
         re.MULTILINE
     )
 
