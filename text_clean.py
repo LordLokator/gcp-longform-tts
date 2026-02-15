@@ -178,8 +178,14 @@ def merge_soft_linebreaks(text: str) -> str:
                 j += 1
                 continue
 
-            # If next starts uppercase, it *might* be a new sentence, so stop
+            # If next starts uppercase, it might be a new sentence — BUT
+            # allow merging if the current line is clearly a wrapped fragment ("Az", "A", etc.)
             if re.match(rf"^[{UPPER_HU}]", nxt):
+                # NEW: merge if the previous line ends with a glue word (e.g. "... bemutatjuk az")
+                if join_end_re.search(buf) or buf.lower() in join_if_alone or len(buf) <= 3:
+                    buf += " " + nxt
+                    j += 1
+                    continue
                 break
 
             buf += " " + nxt
