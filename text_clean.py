@@ -10,6 +10,32 @@ LOWER_HU = "a-záéíóöőúüű"
 
 DOT_PLACEHOLDER = "∯"  # rare symbol to temporarily replace abbreviation dots
 
+HU_CARDINAL = {
+    1: "egy",
+    2: "kettő",
+    3: "három",
+    4: "négy",
+    5: "öt",
+    6: "hat",
+    7: "hét",
+    8: "nyolc",
+    9: "kilenc",
+    10: "tíz",
+}
+
+HU_ORDINAL = {
+    1: "Első",
+    2: "Második",
+    3: "Harmadik",
+    4: "Negyedik",
+    5: "Ötödik",
+    6: "Hatodik",
+    7: "Hetedik",
+    8: "Nyolcadik",
+    9: "Kilencedik",
+    10: "Tizedik",
+}
+
 
 @dataclass
 class CleanConfig:
@@ -41,6 +67,101 @@ def read_text(path: Path) -> str:
 
 def write_text(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8", newline="\n")
+
+
+def normalize_headings(text: str) -> str:
+    """
+    1) Lowercase lines that contain only uppercase HU letters, digits and simple punctuation.
+    2) Insert two blank lines before section-numbered headings like:
+       1.
+       2.3.
+       4.5.6.
+       7.8.9.10
+    """
+
+    # ----------------------------
+    # 1) Lowercase full-caps lines
+    # ----------------------------
+    fullcaps_pattern = re.compile(
+        rf"^[{UPPER_HU}0-9\.\:\-\–—\s]+$",
+        re.MULTILINE
+    )
+
+    text = fullcaps_pattern.sub(
+        lambda m: m.group(0).lower(),
+        text
+    )
+
+    # ----------------------------
+    # 2) Add spacing before numbered headings
+    # ----------------------------
+    # Matches:
+    #   1.
+    #   2.3.
+    #   4.5.6.
+    #   7.8.9.10
+    numbering_pattern = re.compile(
+        r"(?m)^(?=\d+(?:\.\d+)*\.?\s)"
+    )
+
+    text = numbering_pattern.sub("\n\n", text)
+
+    return text
+
+
+def replace_numbered_headings(text: str) -> str:
+    def replacer(match):
+        full = match.group(1)
+        parts = [int(p) for p in full.split(".")]
+
+        if len(parts) == 1:
+            # 1.
+            return HU_ORDINAL.get(parts[0], str(parts[0])) + " "
+        else:
+            # 1.1.1
+            words = [HU_CARDINAL.get(p, str(p)) + " pont" for p in parts[:-1]]
+            words.append(HU_CARDINAL.get(parts[-1], str(parts[-1])))
+            return (" ".join(words) + " ").capitalize()
+
+    pattern = re.compile(r"(?m)^(\d+(?:\.\d+)+|\d+)\.?\s+")
+    return pattern.sub(replacer, text)
+
+# def remove_digit_only_lines(text: str) -> str:
+#     """
+#     Remove lines that contain only digits (e.g. page numbers like '12').
+#     """
+
+#     pattern = re.compile(r"(?m)^[0-9]+\s*$")
+#     return pattern.sub("", text)
+
+
+def remove_headings(text: str) -> str:
+    """
+    Remove lines that contain only digits (e.g. page numbers like '12').
+    """
+
+    pattern = re.compile(r"(?m)^[\ufeff\u200b\u200c\u200d\u00a0]+.*Modul.*$")
+    return pattern.sub("", text)
+
+
+def fix_dangling_words(text: str) -> str:
+    """
+    Dirty fix for weird problem when e.g. "Az\nAlaptörvény" is improperly handled.
+    """
+    # Join short standalone words (1–10 letters) with next line
+    return re.sub(
+        rf"(?m)^([{LOWER_HU}{UPPER_HU}]{{1,10}})\s*\n+",
+        r"\1 ",
+        text,
+    )
+
+
+# def fix_section_signs(text: str) -> str:
+#     return re.sub(
+#         rf"(?m)^([{LOWER_HU}{UPPER_HU}]{{1,10}})\s*\n+",
+#         r"\1 ",
+#         text,
+#     )
 
 
 def normalize_unicode(text: str) -> str:
@@ -233,16 +354,22 @@ def final_polish(text: str) -> str:
 def clean_text(text: str, cfg: CleanConfig) -> str:
     text = normalize_unicode(text)
     text = remove_control_chars(text)
+    text = normalize_headings(text)
     text = drop_junk_lines(text, cfg)
 
     text = fix_hyphenation(text)
     text = collapse_whitespace(text)
 
+    # text = remove_digit_only_lines(text)
+    text = remove_headings(text)
     text = merge_soft_linebreaks(text)
 
     text = protect_abbreviations(text, cfg)
     text = insert_sentence_breaks(text)
     text = restore_abbreviations(text)
+
+    text = fix_dangling_words(text)
+    text = replace_numbered_headings(text)
 
     text = final_polish(text)
     return text
