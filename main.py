@@ -105,7 +105,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     # 2.5) manual pause (optional) BEFORE any remote calls
     if args.pause_before_tts:
         print("\n[manual] Review/edit the cleaned text now.")
-        print(f"         File: {clean_out}")
+        print(f"         File [pdf]: {pdf}")
+        print(f"         File [txt]: {clean_out}")
+
         print("         When ready, press ENTER to continue (or type 'q' then ENTER to abort).")
         resp = input("> ").strip().lower()
         if resp in {"q", "quit", "exit"}:
