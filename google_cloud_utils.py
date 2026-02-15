@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import subprocess
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 import argparse
 import json
 import re
 import time
 import unicodedata
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -418,16 +420,19 @@ def _extract_full_segment_from_error(err_text: str) -> str | None:
 def retry_failed_chunks(
     *,
     output_stem: str,
-    out_dir: Path,
     config: dict,
-    max_bytes: int = MAX_BYTES_PER_REQUEST,
+    out_dir: Path,
+    max_bytes: int = MAX_BYTES_PER_REQUEST // 5,
     sleep_s: float = 0.0,
     dry_run: bool = False,
+    remove_error_marker_on_success: bool = False,
 ) -> list[Path]:
     """
-    Looks for {output_stem}_partN.wav.error.txt and retries ONLY those chunks,
-    using aggressive chunking (; then : then ,), writing files as:
-      {output_stem}_partN_sub01.wav, _sub02.wav, ...
+    Retry ONLY chunks that have .error.txt markers.
+    Re-split the *failed segment* aggressively, synthesize into TEMP mini-wavs,
+    concat them into the ORIGINAL target wav name (e.g. ch_2_part394.wav),
+    and delete the temp files.
+
     Healthy chunks are ignored.
     """
     client, voice, audio_config = _build_client_and_params(config)
@@ -440,83 +445,156 @@ def retry_failed_chunks(
         print(f"[retry] no error markers found for stem={output_stem!r} in {out_dir}")
         return []
 
-    # Stats
     by_type = Counter(r.err_type for r in records)
-    by_chunk = {r.chunk_id: r for r in records}
-
     print(f"[retry] found {len(records)} failed chunk(s) in {out_dir}")
     print("[retry] error types:")
     for k, v in by_type.most_common():
         print(f"  - {k}: {v}")
 
-    print("\n", "--" * 10, "O", "--" * 10, "\n")
     written: list[Path] = []
 
-    for chunk_id, rec in sorted(by_chunk.items(), key=lambda x: x[0]):
-        # If the original wav exists (rare, but possible), treat as healthy and ignore.
+    for rec in sorted(records, key=lambda r: r.chunk_id):
+        # If the original wav exists, treat as healthy and ignore.
         if rec.wav_path.exists():
-            print(f"[retry-skip] chunk {chunk_id}: wav exists ({rec.wav_path.name})")
+            print(f"[retry-skip] chunk {rec.chunk_id}: wav exists ({rec.wav_path.name})")
             continue
 
         err_text = rec.err_path.read_text(encoding="utf-8", errors="replace")
         segment = _extract_full_segment_from_error(err_text)
         if not segment:
-            print(f"[retry-skip] chunk {chunk_id}: cannot extract full segment from {rec.err_path.name}")
+            print(f"[retry-skip] chunk {rec.chunk_id}: cannot extract full segment from {rec.err_path.name}")
             continue
 
         sub_parts = list(_iter_chunks_aggressive(segment, max_bytes=max_bytes))
-        print(f"[retry] chunk {chunk_id}: resplit into {len(sub_parts)} sub-chunk(s)")
+        print(f"[retry] chunk {rec.chunk_id}: resplit into {len(sub_parts)} mini-chunk(s) -> will rebuild {rec.wav_path.name}")
 
         if dry_run:
-            would = [f"{output_stem}_part{chunk_id}_sub{i:02d}.wav" for i in range(1, len(sub_parts) + 1)]
-            print(f"[dry-run] would write: {would[:10]}" + (" ..." if len(would) > 10 else ""))
             continue
 
-        for i, sub in enumerate(sub_parts, start=1):
-            sub = sanitize_for_tts(sub)
-            out_path = out_dir / f"{output_stem}_part{chunk_id}_sub{i:02d}.wav"
+        # Synthesize mini-chunks to temp wavs, then concat into the original target wav name.
+        with TemporaryDirectory() as td:
+            tmp_dir = Path(td)
+            tmp_wavs: list[Path] = []
 
-            # If already retried and present, skip.
-            if out_path.exists():
-                print(f"[retry-skip] exists: {out_path.name}")
+            ok_all = True
+
+            for i, sub in enumerate(sub_parts, start=1):
+                sub = sanitize_for_tts(sub)
+                tmp_wav = tmp_dir / f"tmp_sub{i:03d}.wav"
+
+                start = time.time()
+                try:
+                    synthesis_input = texttospeech.SynthesisInput(text=sub)
+                    print(
+                        f"[tts] retry chunk {rec.chunk_id} mini {i}/{len(sub_parts)} "
+                        f"| head={sub[:40]!r} | bytes={utf8_len(sub)}"
+                    )
+
+                    resp = client.synthesize_speech(
+                        request={
+                            "input": synthesis_input,
+                            "voice": voice,
+                            "audio_config": audio_config,
+                        }
+                    )
+
+                    tmp_wav.write_bytes(resp.audio_content)
+                    tmp_wavs.append(tmp_wav)
+
+                    dt = time.time() - start
+                    print(f"[ok ] tmp mini {i}: {tmp_wav.name} ({dt:.2f}s)")
+
+                    if sleep_s > 0:
+                        time.sleep(sleep_s)
+
+                except Exception as e:
+                    ok_all = False
+                    print(f"[SKIP] retry chunk {rec.chunk_id} mini {i} -> {type(e).__name__}: {e}")
+                    # Write a marker for the FINAL target path so you can retry again later.
+                    _write_error_marker(
+                        rec.wav_path,
+                        chunk_id=rec.chunk_id,
+                        err_type=f"RETRY_{type(e).__name__}",
+                        err_msg=str(e),
+                        segment=sub,
+                    )
+                    break
+
+            if not ok_all:
                 continue
 
-            start = time.time()
+            # Concat minis into the original wav filename
             try:
-                synthesis_input = texttospeech.SynthesisInput(text=sub)
-                print(f"[tts] retry chunk {chunk_id} sub {i}/{len(sub_parts)} | head={sub[:40]!r} | bytes={utf8_len(sub)}")
+                _ffmpeg_concat_wavs_to_wav(tmp_wavs, rec.wav_path)
+                written.append(rec.wav_path)
+                print(f"[ok ] rebuilt: {rec.wav_path.name} (from {len(tmp_wavs)} mini-wav(s))")
 
-                resp = client.synthesize_speech(
-                    request={
-                        "input": synthesis_input,
-                        "voice": voice,
-                        "audio_config": audio_config,
-                    }
-                )
+                # After successful rebuild:
+                resolved = rec.err_path.with_suffix("")          # -> ... .wav.error
+                resolved = resolved.with_suffix(".resolved.txt") # -> ... .wav.error.resolved.txt
+                try:
+                    rec.err_path.replace(resolved)
+                except Exception:
+                    pass
 
-                out_path.write_bytes(resp.audio_content)
-                written.append(out_path)
-
-                dt = time.time() - start
-                print(f"[ok ] {out_path.name} ({dt:.2f}s)")
-
-                if sleep_s > 0:
-                    time.sleep(sleep_s)
-
-            except Exception as e:
-                # Write a NEW marker for the subchunk (so we can iterate again if needed)
-                print(f"[SKIP] {out_path.name} -> {type(e).__name__}: {e}")
+            except subprocess.CalledProcessError as e:
+                print(f"[SKIP] ffmpeg concat failed for chunk {rec.chunk_id}: {e}")
                 _write_error_marker(
-                    out_path,
-                    chunk_id=chunk_id,
-                    err_type=f"RETRY_{type(e).__name__}",
+                    rec.wav_path,
+                    chunk_id=rec.chunk_id,
+                    err_type="RETRY_FFMPEG_CONCAT_FAILED",
                     err_msg=str(e),
-                    segment=sub,
+                    segment=segment,
                 )
                 continue
 
-    print(f"[retry-done] wrote {len(written)} retry file(s)")
+    print(f"[retry-done] rebuilt {len(written)} wav chunk(s)")
     return written
+
+
+def _ffmpeg_concat_wavs_to_wav(wavs: list[Path], out_wav: Path) -> None:
+    """
+    Concatenate WAV files in order into a single WAV using ffmpeg concat demuxer.
+    """
+    if not wavs:
+        raise ValueError("No input wavs to concatenate.")
+
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+
+    def ffmpeg_quote(path: Path) -> str:
+        s = str(path.resolve()).replace("\\", "/")
+        s = s.replace("'", r"'\''")
+        return f"file '{s}'"
+
+    with NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".txt", delete=False) as f:
+        list_path = Path(f.name)
+        for w in wavs:
+            f.write(ffmpeg_quote(w) + "\n")
+
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(list_path),
+        "-c",
+        "copy",
+        str(out_wav),
+    ]
+
+    try:
+        subprocess.run(cmd, check=True)
+    finally:
+        try:
+            list_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def main() -> None:
@@ -545,7 +623,7 @@ def main() -> None:
             output_stem=args.output_stem,
             config=config,
             out_dir=args.out_dir,
-            max_bytes=args.max_bytes,
+            # max_bytes=args.max_bytes,
             sleep_s=args.sleep_s,
             dry_run=args.dry_run,
         )
@@ -571,12 +649,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-
-    paths = retry_failed_chunks(
-        output_stem='ch_2',
-        out_dir=Path(r'.\data\audio_chunks'),
-        max_bytes=MAX_BYTES_PER_REQUEST,
-        dry_run=True,
-        config=load_gcloud_config()
-    )
-    print(paths)
+    main()
