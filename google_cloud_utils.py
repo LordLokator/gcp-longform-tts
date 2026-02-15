@@ -1,4 +1,6 @@
 from __future__ import annotations
+import unicodedata
+import re
 
 import time
 import json
@@ -10,7 +12,38 @@ from google.cloud import texttospeech
 from config import ROOT, MAX_BYTES_PER_REQUEST
 from utils import debug_string, utf8_len
 
+from google.api_core import exceptions as gexc
+
+
+def _write_error_marker(path: Path, msg: str) -> None:
+    err_path = path.with_suffix(path.suffix + ".error.txt")
+    err_path.write_text(msg, encoding="utf-8", newline="\n")
+
+
 CFG_PATH = ROOT / "config.json"
+
+
+# Remove: musical symbols block + common invisible/control chars that appear in PDFs
+_MUSICAL_BLOCK = re.compile(r"[\U0001D100-\U0001D1FF]")
+_INVISIBLES = re.compile(r"[\u200B-\u200F\u202A-\u202E\u2060-\u206F\ufeff]")  # ZW*, bidi, BOM, etc.
+
+
+def sanitize_for_tts(text: str) -> str:
+    # Normalize (often helps with odd ligatures / compatibility chars)
+    text = unicodedata.normalize("NFKC", text)
+
+    # Drop musical symbols (your 𝄐𝄐) + invisibles
+    text = _MUSICAL_BLOCK.sub("", text)
+    text = _INVISIBLES.sub("", text)
+
+    # Drop other control chars except \n and \t
+    text = "".join(ch for ch in text if (ch in "\n\t") or (unicodedata.category(ch)[0] != "C"))
+
+    # Collapse excessive whitespace
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    return text.strip()
 
 
 def load_gcloud_config(path: Path = CFG_PATH) -> dict:
@@ -110,6 +143,7 @@ def synthesize_text(
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    text = sanitize_for_tts(text)
     parts = list(_iter_chunks_by_paragraphs(text, max_bytes=max_bytes))
     written: list[Path] = []
 
@@ -131,7 +165,7 @@ def synthesize_text(
         print(f"[dry-run] would synthesize {len(would)} chunk(s): {would[:20]}" + (" ..." if len(would) > 20 else ""))
         return []
 
-    for idx, segment in enumerate(parts, start=1):
+    for idx, _segment in enumerate(parts, start=1):
         if idx < chunk_offset:
             print(f"[skip] chunk {idx}/{len(parts)} (offset={chunk_offset})")
             continue
@@ -144,6 +178,7 @@ def synthesize_text(
         start = time.time()
         try:
             # Prepare the input for this segment.
+            segment = sanitize_for_tts(_segment)
             synthesis_input = texttospeech.SynthesisInput(text=segment)
             print(f"[tts] chunk {idx}/{len(parts)} | head={segment[:40]!r} | bytes={utf8_len(segment)}")
 
@@ -165,11 +200,19 @@ def synthesize_text(
             if sleep_s > 0:
                 time.sleep(sleep_s)
 
+        except gexc.InvalidArgument as e:
+            # Known failure class: sentence too long (or other invalid input)
+            msg = f"[chunk {idx}] InvalidArgument: {e}\n\n--- chunk head ---\n{repr(segment)}\n"
+            print(f"[SKIP] ch_{idx}_part{idx}.wav -> {e}")
+            _write_error_marker(part_path, msg)
+            continue
+
         except Exception as e:
-            print("[ERROR]", e)
-            print("\n--- DEBUG: chunk head ---")
-            debug_string(segment)
-            raise
+            # Any other error: also skip, but record it
+            msg = f"[chunk {idx}] Exception: {type(e).__name__}: {e}\n\n--- chunk head ---\n{repr(segment)}\n"
+            print(f"[SKIP] ch_{idx}_part{idx}.wav -> {type(e).__name__}: {e}")
+            _write_error_marker(part_path, msg)
+            continue
 
     print(f"[done] {output_stem}: {len(text)} chars, {len(parts)} chunk(s), wrote {len(written)} file(s)")
     return written
