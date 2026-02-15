@@ -155,6 +155,7 @@ def fix_dangling_words(text: str) -> str:
         text,
     )
 
+
 def fix_parentheses_linebreaks(text: str) -> str:
     result: list[str] = []
     depth = 0
@@ -171,7 +172,6 @@ def fix_parentheses_linebreaks(text: str) -> str:
         else:
             result.append(ch)
     return ''.join(result)
-
 
 
 def normalize_unicode(text: str) -> str:
@@ -258,7 +258,6 @@ def merge_soft_linebreaks(text: str) -> str:
     bullet_re = re.compile(r"^\s*([•\-–—]|(\d+[\.\)]))\s+")
     heading_re = re.compile(r"^\s*[A-ZÁÉÍÓÖŐÚÜŰ0-9][A-ZÁÉÍÓÖŐÚÜŰ0-9 \-]{4,}\s*$")
 
-
     # If a whole line is just a short function word, merge it with the next line
     join_if_alone = {
         "a", "az", "és", "vagy", "de", "hogy", "mint", "mert", "hanem",
@@ -274,7 +273,6 @@ def merge_soft_linebreaks(text: str) -> str:
     }
 
     join_end_re = re.compile(rf"(?:^|\s)\b({'|'.join(map(re.escape, sorted(join_if_endswith, key=len, reverse=True)))})\s*$", re.IGNORECASE)
-
 
     while i < len(lines):
         line = lines[i].strip()
@@ -328,6 +326,51 @@ def protect_abbreviations(text: str, cfg: CleanConfig) -> str:
     return text
 
 
+def postprocess_titles(text: str) -> str:
+    """
+    Append a period to heading lines and insert a blank line afterwards.
+
+    It detects headings if they start with a Hungarian ordinal (Első, Második…),
+    a cardinal with the word 'pont' (e.g. 'három pont'), or a dotted numeric
+    pattern like '3.1.3.7.'.
+    """
+    # Sets for matching ordinal and cardinal words
+    ordinal_set = {v.lower() for v in HU_ORDINAL.values()}
+    cardinal_set = {v.lower() for v in HU_CARDINAL.values()}
+    lines = text.split("\n")
+    output = []
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        inserted = False
+        if stripped:
+            tokens = stripped.split()
+            first = tokens[0].rstrip('.').lower()
+            is_heading = False
+            # Check ordinal start (Első, Második…)
+            if first in ordinal_set:
+                is_heading = True
+            # Check cardinal followed by 'pont'
+            elif len(tokens) >= 2 and \
+                    tokens[0].rstrip('.').lower() in cardinal_set and \
+                    tokens[1].lower() == 'pont':
+                is_heading = True
+            # Check dotted numeric pattern (e.g. '3.1.3.7')
+            elif re.match(r"^\d+(?:\.\d+)+$", tokens[0].rstrip('.')):
+                is_heading = True
+            if is_heading:
+                # Ensure the heading ends with a period
+                if not stripped.endswith("."):
+                    stripped = stripped.rstrip(".") + "."
+                output.append(stripped)
+                inserted = True
+                # Insert blank line if the next line is non‑empty
+                if idx + 1 < len(lines) and lines[idx + 1].strip() != "":
+                    output.append("")
+        if not inserted:
+            output.append(line)
+    return "\n".join(output)
+
+
 def restore_abbreviations(text: str) -> str:
     return text.replace(DOT_PLACEHOLDER, ".")
 
@@ -346,16 +389,20 @@ def clean_text(text: str, cfg: CleanConfig) -> str:
 
     text = fix_hyphenation(text)
     text = collapse_whitespace(text)
-
     text = remove_headings(text)
+
     text = fix_parentheses_linebreaks(text)
     text = merge_soft_linebreaks(text)
 
     text = protect_abbreviations(text, cfg)
     text = restore_abbreviations(text)
-
     text = fix_dangling_words(text)
+
+    text = postprocess_titles(text)
+
     text = replace_numbered_headings(text)
+
+    text = postprocess_titles(text)
 
     text = final_polish(text)
     return text
