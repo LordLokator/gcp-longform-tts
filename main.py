@@ -137,6 +137,21 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="PDF -> cleaned text -> Google Cloud TTS -> merged audio")
+
+    # Cropping options (available for ALL subcommands)
+    p.add_argument(
+        "--top",
+        type=float,
+        default=0.10,
+        help="Top margin to ignore as fraction of page height (e.g. 0.10 = 10%).",
+    )
+    p.add_argument(
+        "--bottom",
+        type=float,
+        default=0.10,
+        help="Bottom margin to ignore as fraction of page height (e.g. 0.10 = 10%).",
+    )
+
     sub = p.add_subparsers(required=True)
 
     # extract
@@ -145,19 +160,6 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--out", required=True, help="Path to output .txt")
     pe.add_argument("--join-with", default="", help="String inserted between pages (default: '')")
     pe.add_argument("--overwrite", action="store_true")
-    # Cropping options
-    pe.add_argument(
-        "--top",
-        type=float,
-        default=0.1,
-        help="Top margin to ignore, as fraction of page height (default: 0.0; e.g. 0.10 = 10%).",
-    )
-    pe.add_argument(
-        "--bottom",
-        type=float,
-        default=0.1,
-        help="Bottom margin to ignore, as fraction of page height (default: 0.0; e.g. 0.10 = 10%).",
-    )
     pe.set_defaults(func=cmd_extract)
 
     # clean
@@ -170,6 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
     pt = sub.add_parser("tts", help="Call Google Cloud TTS on a cleaned text file -> wav chunks")
     pt.add_argument("--src", required=True, help="Path to cleaned .txt")
     pt.add_argument("--chapter", required=True, help="Chapter id, e.g. intro, 1, 2, 3")
+    pt.add_argument("--out-dir", default=str(AUDIO_CHUNKS_DIR), help="Output directory for wav chunks")
     pt.add_argument("--offset", type=int, default=0, help="Skip first N chunks (1-indexed)")
     pt.add_argument("--sleep", type=float, default=0.0, help="Optional sleep between requests (seconds)")
     pt.add_argument("--dry-run", action="store_true", help="Only show chunking plan (no TTS requests)")
@@ -179,6 +182,8 @@ def build_parser() -> argparse.ArgumentParser:
     # merge
     pm = sub.add_parser("merge", help="Merge wav chunks into MP3 (requires ffmpeg)")
     pm.add_argument("--chapter", default="", help="Only merge this chapter id (default: all)")
+    pm.add_argument("--chunks-dir", default=str(AUDIO_CHUNKS_DIR), help="Where wav chunks are stored")
+    pm.add_argument("--out-dir", default=str(OUTPUT_AUDIO_DIR), help="Where final MP3s go")
     pm.set_defaults(func=cmd_merge)
 
     # run
@@ -191,26 +196,18 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--sleep", type=float, default=0.0, help="Optional sleep between requests (seconds)")
     pr.add_argument("--dry-run", action="store_true", help="Only show chunking plan (no TTS requests)")
     pr.add_argument("--skip-existing", action="store_true", help="Skip chunks whose WAV already exists")
-    # Cropping options
-    pr.add_argument(
-        "--top",
-        type=float,
-        default=0.1,
-        help="Top margin to ignore, as fraction of page height (default: 0.0; e.g. 0.10 = 10%).",
-    )
-    pr.add_argument(
-        "--bottom",
-        type=float,
-        default=0.1,
-        help="Bottom margin to ignore, as fraction of page height (default: 0.0; e.g. 0.10 = 10%).",
-    )
-
-    # Pause for Human in the Loop:
     pr.add_argument(
         "--pause-before-tts",
         action="store_true",
         help="Pause after auto-cleanup so you can manually edit the cleaned text before TTS",
     )
+
+    # outputs (override defaults)
+    pr.add_argument("--raw-dir", default=str(RAW_TEXT_DIR), help="Directory for raw text outputs")
+    pr.add_argument("--clean-dir", default=str(PROCESSED_TEXT_DIR), help="Directory for cleaned text outputs")
+    pr.add_argument("--chunks-dir", default=str(AUDIO_CHUNKS_DIR), help="Directory for wav chunk outputs")
+    pr.add_argument("--raw-out", default="", help="Explicit raw output path (overrides --raw-dir)")
+    pr.add_argument("--clean-out", default="", help="Explicit cleaned output path (overrides --clean-dir)")
 
     pr.set_defaults(func=cmd_run)
 
