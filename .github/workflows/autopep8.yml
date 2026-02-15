@@ -1,9 +1,7 @@
 ﻿name: Autopep8 Format
 
 on:
-  push:
-    branches:
-      - "**"
+  pull_request:
 
 jobs:
   format:
