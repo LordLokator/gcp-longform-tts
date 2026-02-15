@@ -10,6 +10,7 @@ from config import (
     AUDIO_CHUNKS_DIR,
     OUTPUT_AUDIO_DIR,
 )
+from generate_report import write_markdown_review
 from pdf_extractor import PdfToTextConfig, pdf_to_raw_text
 from text_clean import CleanConfig, clean_file
 from google_cloud_utils import load_gcloud_config, synthesize_text
@@ -104,6 +105,10 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     # 2.5) manual pause (optional) BEFORE any remote calls
     if args.pause_before_tts:
+        review_md = clean_out.with_suffix(".review.md")
+        write_markdown_review(clean_out, review_md)
+        print(f"[review] Markdown review created: {review_md}")
+
         print("\n[manual] Review/edit the cleaned text now.")
         print(f"         File [pdf]: {pdf}")
         print(f"         File [txt]: {clean_out}")
