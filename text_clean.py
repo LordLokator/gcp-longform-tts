@@ -50,11 +50,18 @@ def normalize_unicode(text: str) -> str:
     # Normalize line endings
     text = text.replace("\r\n", "\n").replace("\r", "\n")
 
+    # Remove soft hyphen (discretionary hyphen) artifacts from PDF extraction
+    # If it occurs at line end (word split), join without space.
+    text = re.sub(r"\u00AD\s*\n\s*", "", text)
+    # If it occurs elsewhere, just drop it.
+    text = text.replace("\u00AD", "")
+
     # Convert NBSP and friends to normal spaces
     text = text.replace("\u00A0", " ").replace("\u2007", " ").replace("\u202F", " ")
 
     # Normalize quotes/dashes (optional but helps TTS consistency)
     text = text.replace("“", "\"").replace("”", "\"").replace("„", "\"")
+    text = text.replace("\t", " ")
     text = text.replace("’", "'").replace("–", "-").replace("—", "-")
 
     return text
