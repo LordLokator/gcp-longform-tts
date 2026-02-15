@@ -155,13 +155,23 @@ def fix_dangling_words(text: str) -> str:
         text,
     )
 
+def fix_parentheses_linebreaks(text: str) -> str:
+    result: list[str] = []
+    depth = 0
+    for ch in text:
+        if ch == '(':
+            depth += 1
+            result.append(ch)
+        elif ch == ')':
+            if depth > 0:
+                depth -= 1
+            result.append(ch)
+        elif ch == '\n' and depth > 0:
+            result.append(' ')
+        else:
+            result.append(ch)
+    return ''.join(result)
 
-# def fix_section_signs(text: str) -> str:
-#     return re.sub(
-#         rf"(?m)^([{LOWER_HU}{UPPER_HU}]{{1,10}})\s*\n+",
-#         r"\1 ",
-#         text,
-#     )
 
 
 def normalize_unicode(text: str) -> str:
