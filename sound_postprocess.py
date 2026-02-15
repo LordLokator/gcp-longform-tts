@@ -51,7 +51,16 @@ def collect_by_chapter(input_dir: Path) -> dict[str, list[Path]]:
     return out
 
 
-def _ffmpeg_concat_to_mp3(wavs: list[Path], out_mp3: Path) -> None:
+def _ffmpeg_concat_to_mp3(
+    wavs: list[Path],
+    out_mp3: Path,
+    *,
+    title: str | None = None,
+    album: str | None = None,
+    artist: str | None = None,
+    track: str | int | None = None,
+    genre: str = "Audiobook",
+) -> None:
     """
     Concatenate WAV files in order into an MP3 using ffmpeg concat demuxer.
     Does not modify the input WAVs.
@@ -74,21 +83,27 @@ def _ffmpeg_concat_to_mp3(wavs: list[Path], out_mp3: Path) -> None:
     cmd = [
         "ffmpeg",
         "-hide_banner",
-        "-loglevel",
-        "error",
+        "-loglevel", "error",
         "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        str(list_path),
-        "-c:a",
-        "libmp3lame",
-        "-q:a",
-        "2",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", str(list_path),
+        "-c:a", "libmp3lame",
+        "-q:a", "2",
         str(out_mp3),
+        "-metadata", f"genre={genre}",
     ]
+
+    # Inject metadata if provided
+    if title:
+        cmd += ["-metadata", f"title={title}"]
+    if album:
+        cmd += ["-metadata", f"album={album}"]
+    if artist:
+        cmd += ["-metadata", f"artist={artist}"]
+    if track is not None:
+        cmd += ["-metadata", f"track={track}"]
+        "-metadata", f"genre={genre}",
 
     try:
         subprocess.run(cmd, check=True)
@@ -97,6 +112,33 @@ def _ffmpeg_concat_to_mp3(wavs: list[Path], out_mp3: Path) -> None:
             list_path.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def tag_mp3_ffmpeg(
+    src: Path,
+    dst: Path,
+    *,
+    title: str,
+    album: str,
+    artist: str,
+    track: int | str,
+    genre: str = "Audiobook",
+) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", str(src),
+        "-metadata", f"title={title}",
+        "-metadata", f"album={album}",
+        "-metadata", f"artist={artist}",
+        "-metadata", f"track={track}",
+        "-metadata", f"genre={genre}",
+        "-codec", "copy",
+        str(dst),
+    ]
+    subprocess.run(cmd, check=True)
 
 
 def main() -> None:
@@ -111,6 +153,7 @@ def main() -> None:
         out_mp3 = OUTPUT_AUDIO_DIR / f"ch_{chapter}.mp3"
         print(f"[{chapter}] {len(wavs)} parts -> {out_mp3}")
         _ffmpeg_concat_to_mp3(wavs, out_mp3)
+        tag_mp3_ffmpeg()
 
     print("Done.")
 
