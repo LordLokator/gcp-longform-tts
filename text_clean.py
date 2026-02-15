@@ -291,34 +291,26 @@ def merge_soft_linebreaks(text: str) -> str:
         j = i + 1
         while j < len(lines):
             nxt = lines[j].strip()
-            if nxt == "":
+            if nxt == "" or bullet_re.match(nxt) or heading_re.match(nxt):
                 break
-            if bullet_re.match(nxt) or heading_re.match(nxt):
+            starts_continuation = bool(re.match(rf"^[{LOWER_HU}0-9\"'(\[]", nxt))
+            starts_upper = bool(re.match(rf"^[{UPPER_HU}]", nxt))
+            ends_strongly = bool(re.search(r"[.!?…]([\"'\)\]]*)\s*$", buf))
+            should_join = False
+            if starts_continuation:
+                should_join = True
+            elif starts_upper:
+                if join_end_re.search(buf) or buf.lower() in join_if_alone or len(buf) <= 3:
+                    should_join = True
+            else:
+                should_join = True
+            if ends_strongly and not should_join:
                 break
-
-            # If current buffer ends a sentence strongly, don't merge further
-            if re.search(r"[.!?…]([\"'\)\]]*)\s*$", buf):
-                break
-
-            # If next line starts like continuation: lowercase, digit, quote, bracket
-            if re.match(rf"^[{LOWER_HU}0-9\"'\(\[]", nxt):
+            if should_join:
                 buf += " " + nxt
                 j += 1
                 continue
-
-            # If next starts uppercase, it might be a new sentence — BUT
-            # allow merging if the current line is clearly a wrapped fragment ("Az", "A", etc.)
-            if re.match(rf"^[{UPPER_HU}]", nxt):
-                # NEW: merge if the previous line ends with a glue word (e.g. "... bemutatjuk az")
-                if join_end_re.search(buf) or buf.lower() in join_if_alone or len(buf) <= 3:
-                    buf += " " + nxt
-                    j += 1
-                    continue
-                break
-
-            buf += " " + nxt
-            j += 1
-
+            break
         out.append(buf)
         i = j
 
@@ -355,12 +347,11 @@ def clean_text(text: str, cfg: CleanConfig) -> str:
     text = fix_hyphenation(text)
     text = collapse_whitespace(text)
 
-    # text = remove_digit_only_lines(text)
     text = remove_headings(text)
+    text = fix_parentheses_linebreaks(text)
     text = merge_soft_linebreaks(text)
 
     text = protect_abbreviations(text, cfg)
-    text = insert_sentence_breaks(text)
     text = restore_abbreviations(text)
 
     text = fix_dangling_words(text)
