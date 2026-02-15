@@ -150,7 +150,7 @@ def main() -> None:
 
     for chapter in sorted(chapters.keys(), key=chapter_sort_key):
         wavs = chapters[chapter]
-        out_mp3 = OUTPUT_AUDIO_DIR / f"ch_{chapter}.mp3"
+        out_mp3 = OUTPUT_AUDIO_DIR / f"Chapter_{chapter}.mp3"
         print(f"[{chapter}] {len(wavs)} parts -> {out_mp3}")
         _ffmpeg_concat_to_mp3(wavs, out_mp3)
         tag_mp3_ffmpeg()
