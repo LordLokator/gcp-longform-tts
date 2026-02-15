@@ -127,6 +127,24 @@ def merge_soft_linebreaks(text: str) -> str:
     bullet_re = re.compile(r"^\s*([•\-–—]|(\d+[\.\)]))\s+")
     heading_re = re.compile(r"^\s*[A-ZÁÉÍÓÖŐÚÜŰ0-9][A-ZÁÉÍÓÖŐÚÜŰ0-9 \-]{4,}\s*$")
 
+
+    # If a whole line is just a short function word, merge it with the next line
+    join_if_alone = {
+        "a", "az", "és", "vagy", "de", "hogy", "mint", "mert", "hanem",
+        "illetve", "valamint", "amely", "amelyek", "aki", "akik",
+        "ez", "ezt", "azt", "annak", "ennek", "arra", "erre",
+        "alapján", "szerint", "miatt", "között", "közül", "alatt", "fölött",
+    }
+
+    # If a normal line ENDS with a glue word, it's very likely wrapped text, not a new sentence
+    join_if_endswith = join_if_alone | {
+        "az", "a", "és", "vagy", "de", "valamint", "illetve", "mint", "mert",
+        "hogy", "amely", "amelyek", "aki", "akik",
+    }
+
+    join_end_re = re.compile(rf"(?:^|\s)\b({'|'.join(map(re.escape, sorted(join_if_endswith, key=len, reverse=True)))})\s*$", re.IGNORECASE)
+
+
     while i < len(lines):
         line = lines[i].strip()
         if line == "":
