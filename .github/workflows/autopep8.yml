@@ -1,0 +1,23 @@
+﻿name: Autopep8 Format
+
+on:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run autopep8
+        uses: peter-evans/autopep8@v2
+        with:
+          args: --in-place --recursive --max-line-length=256 .
+
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Auto-format with autopep8"
