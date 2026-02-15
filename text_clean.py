@@ -57,7 +57,7 @@ class CleanConfig:
     abbreviations: tuple[str, ...] = (
         "Dr.", "Prof.", "pl.", "Pl.", "stb.", "Stb.", "kb.", "Kb.",
         "u.", "U.", "vö.", "Vö.", "ld.", "Ld.", "sz.", "Sz.",
-        "év.", "Év.", "old.", "Old.", "fej.", "Fej.",
+        "év.", "Év.", "old.", "Old.", "fej.", "Fej.", "Ákr."
     )
 
 
