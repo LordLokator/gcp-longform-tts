@@ -140,6 +140,19 @@ def build_parser() -> argparse.ArgumentParser:
     pe.add_argument("--out", required=True, help="Path to output .txt")
     pe.add_argument("--join-with", default="", help="String inserted between pages (default: '')")
     pe.add_argument("--overwrite", action="store_true")
+    # Cropping options
+    p.add_argument(
+        "--top",
+        type=float,
+        default=0.1,
+        help="Top margin to ignore, as fraction of page height (default: 0.0; e.g. 0.10 = 10%).",
+    )
+    p.add_argument(
+        "--bottom",
+        type=float,
+        default=0.1,
+        help="Bottom margin to ignore, as fraction of page height (default: 0.0; e.g. 0.10 = 10%).",
+    )
     pe.set_defaults(func=cmd_extract)
 
     # clean
@@ -173,6 +186,19 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--sleep", type=float, default=0.0, help="Optional sleep between requests (seconds)")
     pr.add_argument("--dry-run", action="store_true", help="Only show chunking plan (no TTS requests)")
     pr.add_argument("--skip-existing", action="store_true", help="Skip chunks whose WAV already exists")
+    # Cropping options
+    p.add_argument(
+        "--top",
+        type=float,
+        default=0.1,
+        help="Top margin to ignore, as fraction of page height (default: 0.0; e.g. 0.10 = 10%).",
+    )
+    p.add_argument(
+        "--bottom",
+        type=float,
+        default=0.1,
+        help="Bottom margin to ignore, as fraction of page height (default: 0.0; e.g. 0.10 = 10%).",
+    )
 
     # Pause for Human in the Loop:
     pr.add_argument(
