@@ -27,6 +27,9 @@ def cmd_extract(args: argparse.Namespace) -> None:
         join_with=args.join_with,
         overwrite=args.overwrite,
         create_parents=True,
+        add_page_markers=False,
+        bottom_pct=args.bottom,
+        top_pct=args.top,
     )
     pdf_to_raw_text(cfg)
     print(f"[ok] raw text -> {out}")
@@ -94,6 +97,10 @@ def cmd_run(args: argparse.Namespace) -> None:
         PdfToTextConfig(
             src=pdf,
             out=raw_out,
+            create_parents=True,
+            add_page_markers=False,
+            bottom_pct=args.bottom,
+            top_pct=args.top,
             join_with=args.join_with,
             overwrite=args.overwrite,
         )
@@ -105,19 +112,24 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     # 2.5) manual pause (optional) BEFORE any remote calls
     if args.pause_before_tts:
-        review_md = clean_out.with_suffix(".review.md")
-        write_markdown_review(clean_out, review_md)
-        print(f"[review] Markdown review created: {review_md}")
+        while True:
+            review_md = clean_out.with_suffix(".review.md")
+            write_markdown_review(clean_out, review_md)
+            print(f"[review] Markdown review created: {review_md}")
 
-        print("\n[manual] Review/edit the cleaned text now.")
-        print(f"         File [pdf]: {pdf}")
-        print(f"         File [txt]: {clean_out}")
+            print("\n[manual] Review/edit the cleaned text now.")
+            print(f"         File [pdf]: {pdf}")
+            print(f"         File [txt]: {clean_out}")
 
-        print("         When ready, press ENTER to continue (or type 'q' then ENTER to abort).")
-        resp = input("> ").strip().lower()
-        if resp in {"q", "quit", "exit"}:
-            print("[abort] stopped before TTS")
-            return
+            print("         R -> REDO | Q -> QUIT | Else -> Continue")
+            resp = input("> ").strip().lower()
+            if resp in {"q", "quit", "exit"}:
+                print("[abort] stopped before TTS")
+                return
+            elif resp in {"r", "redo"}:
+                continue
+            else:
+                break
 
     # 3) cleaned -> wav chunks
     config = load_gcloud_config()
