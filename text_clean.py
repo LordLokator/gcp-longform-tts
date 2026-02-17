@@ -21,6 +21,16 @@ HU_CARDINAL = {
     8: "nyolc",
     9: "kilenc",
     10: "tíz",
+    11: "tizenegy",
+    12: "tizenkettő",
+    13: "tizenhárom",
+    14: "tizennégy",
+    15: "tizenöt",
+    16: "tizenhat",
+    17: "tizenhét",
+    18: "tizennyolc",
+    19: "tizenkilenc",
+    20: "húsz",
 }
 
 HU_ORDINAL = {
@@ -34,6 +44,16 @@ HU_ORDINAL = {
     8: "Nyolcadik",
     9: "Kilencedik",
     10: "Tizedik",
+    11: "Tizenegyedik",
+    12: "Tizenkettedik",
+    13: "Tizenharmadik",
+    14: "Tizennegyedik",
+    15: "Tizenötödik",
+    16: "Tizenhatodik",
+    17: "Tizenhetedik",
+    18: "Tizennyolcadik",
+    19: "Tizenkilencedik",
+    20: "Huszadik",
 }
 
 
