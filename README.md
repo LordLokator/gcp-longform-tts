@@ -1,5 +1,7 @@
 # Google Cloud TTS – Hungarian textbook → long-form audio
 
+A small project for creating an audiobook version of pdf files, using Python3 and the Google Cloud Text-to-Speech Long-form API.
+
 Voice in use: `hu-HU-Chirp3-HD-Algenib`
 Audio encoding: `LINEAR16` (WAV chunks), merged to MP3 with `ffmpeg`.
 
