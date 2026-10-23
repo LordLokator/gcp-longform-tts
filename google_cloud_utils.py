@@ -531,7 +531,7 @@ def retry_failed_chunks(
 
                 # After successful rebuild:
                 resolved = rec.err_path.with_suffix("")          # -> ... .wav.error
-                resolved = resolved.with_suffix(".resolved.txt") # -> ... .wav.error.resolved.txt
+                resolved = resolved.with_suffix(".resolved.txt")  # -> ... .wav.error.resolved.txt
                 try:
                     rec.err_path.replace(resolved)
                 except Exception:
